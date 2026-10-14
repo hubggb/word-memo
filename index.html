@@ -33,7 +33,6 @@
     --danger: #f87171;
     --shadow: 0 4px 14px rgba(0,0,0,.3);
   }
-
   * { box-sizing: border-box; margin: 0; padding: 0; -webkit-tap-highlight-color: transparent; }
   body {
     font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
@@ -96,7 +95,6 @@
     border-radius: 12px;
     font-size: 18px;
   }
-
   .quiz-card {
     text-align: center;
     padding: 36px 20px;
@@ -159,6 +157,7 @@
     align-items: center;
   }
   .wrong-item .en { font-weight: 700; color: var(--primary); }
+  .wrong-item .pos { color: var(--sub); font-size: 13px; margin: 0 6px; }
   .wrong-item .cn { color: var(--text); margin-left: 8px; }
   .wrong-item .del {
     color: var(--danger);
@@ -199,16 +198,14 @@
 </style>
 </head>
 <body>
-
 <h1>
   📚 温氏单词
   <button class="icon-btn ghost" onclick="toggleTheme()" title="切换主题">🌙</button>
 </h1>
-
 <div class="card">
   <h3>导入单词</h3>
   <p style="font-size:14px;color:var(--sub);margin-bottom:8px;">
-    格式：<code>英文,中文</code> 一行一个，支持逗号/空格/制表符分隔
+    格式：<code>英文,词性,中文</code> 一行一个，支持逗号/空格/制表符分隔（兼容旧版两列格式）
   </p>
   <textarea id="wordInput" placeholder="粘贴单词列表..."></textarea>
   <div style="margin-top:10px; display:flex; flex-wrap:wrap; gap:8px;">
@@ -218,7 +215,6 @@
     <button class="ghost" onclick="clearAllData()">清空全部</button>
   </div>
 </div>
-
 <div class="card">
   <div class="flex-between">
     <h3>背诵设置</h3>
@@ -229,18 +225,15 @@
   <label style="font-size:14px;">本轮题量：</label>
   <input type="number" id="batchSize" value="20" min="1" />
   <small>（超过总词数按总词数算）</small>
-
   <div class="options" style="margin-top:12px;">
     <button id="mode1" class="mode-btn active" onclick="setMode(1)">英文 → 猜中文</button>
     <button id="mode2" class="mode-btn" onclick="setMode(2)">中文 → 猜英文</button>
   </div>
 </div>
-
 <div class="card quiz-card">
   <div class="meta" id="progress">未开始</div>
   <div class="question" id="question">点击「开始本轮」</div>
   <div class="answer" id="answer"></div>
-
   <div class="options">
     <button onclick="startBatch()" id="startBtn">开始本轮</button>
     <button onclick="speak(currentWord.en)" class="ghost" id="replayBtn" disabled>🔊 重听</button>
@@ -250,7 +243,6 @@
     <button class="ghost" onclick="markMaster()" id="masterBtn" disabled>已掌握</button>
   </div>
 </div>
-
 <div class="card">
   <h3>📊 统计</h3>
   <div class="stat-row">
@@ -264,7 +256,6 @@
   <button class="secondary" onclick="resetBatch()">重置本轮</button>
   <button class="clear" onclick="clearWrong()">清空错题本</button>
 </div>
-
 <div class="card">
   <h3>❌ 错题本</h3>
   <small>答错自动收录，可单独再练</small>
@@ -273,7 +264,6 @@
   </div>
   <div class="wrong-list" id="wrongList"></div>
 </div>
-
 <script>
 let wordList = [];
 let masteredList = [];
@@ -283,11 +273,9 @@ let batch = [];
 let idx = 0;
 let right = 0;
 let wrong = 0;
-
 const STORAGE_KEY = "wenshi_word_v2";
 const WRONG_KEY = "wenshi_word_wrong_v2";
 const THEME_KEY = "wenshi_word_theme";
-
 function init() {
   loadTheme();
   loadLocal();
@@ -308,7 +296,6 @@ function init() {
     } catch(e) {}
   }
 }
-
 function loadTheme() {
   const t = localStorage.getItem(THEME_KEY);
   if (t) document.documentElement.setAttribute("data-theme", t);
@@ -319,14 +306,12 @@ function toggleTheme() {
   document.documentElement.setAttribute("data-theme", next);
   localStorage.setItem(THEME_KEY, next);
 }
-
 function toggleKeepAwake() {
   const on = document.getElementById("keepAwake").checked;
   if (on && "wakeLock" in navigator) {
     navigator.wakeLock.request("screen").catch(()=>{});
   }
 }
-
 function loadLocal() {
   const raw = localStorage.getItem(STORAGE_KEY);
   if (raw) {
@@ -335,13 +320,13 @@ function loadLocal() {
     masteredList = data.masteredList || [];
     mode = data.mode || 1;
     document.getElementById("batchSize").value = data.batchSize || 20;
+    // 回填文本框时带上词性
     document.getElementById("wordInput").value = wordList
-      .map(w => `${w.en},${w.cn}`)
+      .map(w => `${w.en},${w.pos || ''},${w.cn}`)
       .join("\n");
   }
   setMode(mode, true);
 }
-
 function saveLocal() {
   localStorage.setItem(
     STORAGE_KEY,
@@ -354,7 +339,6 @@ function saveLocal() {
   );
   saveProgress();
 }
-
 function saveProgress() {
   if (batch.length > 0) {
     sessionStorage.setItem("batch_progress", JSON.stringify({
@@ -362,7 +346,6 @@ function saveProgress() {
     }));
   }
 }
-
 function loadWords() {
   const text = document.getElementById("wordInput").value.trim();
   if (!text) { alert("请先粘贴单词"); return; }
@@ -372,10 +355,18 @@ function loadWords() {
     const trim = line.trim();
     if (!trim) continue;
     let parts = trim.split(/[,\t\s]+/);
-    const en = parts[0];
-    const cn = parts.slice(1).join(" ").trim();
+    const en = parts[0]?.trim() || "";
+    // 自动识别：3列=带词性，2列=兼容旧格式
+    let pos = "";
+    let cn = "";
+    if (parts.length >= 3) {
+      pos = parts[1]?.trim() || "";
+      cn = parts.slice(2).join(" ").trim();
+    } else {
+      cn = parts.slice(1).join(" ").trim();
+    }
     if (en && cn) {
-      wordList.push({ en: en.trim(), cn: cn.trim() });
+      wordList.push({ en, pos, cn });
     }
   }
   if (wordList.length === 0) { alert("没有解析到有效单词"); return; }
@@ -384,7 +375,6 @@ function loadWords() {
   alert(`成功导入 ${wordList.length} 个单词`);
   startBatch();
 }
-
 function setMode(m, skipStart) {
   mode = m;
   document.getElementById("mode1").classList.toggle("active", m === 1);
@@ -392,11 +382,9 @@ function setMode(m, skipStart) {
   saveLocal();
   if (!skipStart && getAvailableWords().length > 0) startBatch();
 }
-
 function getAvailableWords() {
   return wordList.filter(w => !masteredList.some(m => m.en === w.en));
 }
-
 function startBatch() {
   const pool = getAvailableWords();
   if (pool.length === 0) { alert("没有可用单词，请先导入或取消已掌握"); return; }
@@ -409,7 +397,6 @@ function startBatch() {
   updateStat();
   showCard();
 }
-
 function showCard() {
   if (idx >= batch.length) {
     document.getElementById("question").innerText = "🎉 本轮结束！";
@@ -424,44 +411,44 @@ function showCard() {
   document.getElementById("answer").style.display = "none";
   document.getElementById("answer").innerText = "";
   document.getElementById("progress").innerText = `第 ${idx + 1} / ${batch.length} 题`;
-
   const qEl = document.getElementById("question");
   qEl.style.animation = "none";
   qEl.offsetHeight;
   qEl.style.animation = "fadeIn .3s forwards";
-
   if (mode === 1) {
     qEl.innerText = currentWord.en;
   } else {
     qEl.innerText = currentWord.cn;
   }
-
   speak(currentWord.en);
   disableButtons(false);
   saveProgress();
 }
-
 function showAnswer() {
   if (!currentWord) return;
-  const ans = mode === 1 ? currentWord.cn : currentWord.en;
+  let ans = "";
+  if (mode === 1) {
+    // 英文猜中文：答案 = 词性 + 中文
+    ans = (currentWord.pos ? currentWord.pos + "  " : "") + currentWord.cn;
+  } else {
+    // 中文猜英文：答案 = 英文 + 词性
+    ans = currentWord.en + (currentWord.pos ? "  " + currentWord.pos : "");
+  }
   const ansEl = document.getElementById("answer");
   ansEl.innerText = ans;
   ansEl.style.display = "block";
 }
-
 function markRight() {
   if (!currentWord) return;
   right++;
   nextCard();
 }
-
 function markWrong() {
   if (!currentWord) return;
   wrong++;
   addWrong(currentWord);
   nextCard();
 }
-
 function markMaster() {
   if (!currentWord) return;
   if (!confirm("标记为已掌握，以后不再出题？")) return;
@@ -472,13 +459,11 @@ function markMaster() {
   updateTotal();
   nextCard();
 }
-
 function nextCard() {
   updateStat();
   idx++;
   showCard();
 }
-
 function addWrong(word) {
   const wrongs = JSON.parse(localStorage.getItem(WRONG_KEY) || "[]");
   if (!wrongs.some(w => w.en === word.en && w.cn === word.cn)) {
@@ -487,14 +472,12 @@ function addWrong(word) {
   }
   renderWrong();
 }
-
 function removeWrong(en) {
   let wrongs = JSON.parse(localStorage.getItem(WRONG_KEY) || "[]");
   wrongs = wrongs.filter(w => w.en !== en);
   localStorage.setItem(WRONG_KEY, JSON.stringify(wrongs));
   renderWrong();
 }
-
 function renderWrong() {
   const wrongs = JSON.parse(localStorage.getItem(WRONG_KEY) || "[]");
   const box = document.getElementById("wrongList");
@@ -505,18 +488,20 @@ function renderWrong() {
   box.innerHTML = wrongs
     .map(w => `
       <div class="wrong-item">
-        <span><span class="en">${w.en}</span><span class="cn">${w.cn}</span></span>
+        <span>
+          <span class="en">${w.en}</span>
+          ${w.pos ? `<span class="pos">${w.pos}</span>` : ''}
+          <span class="cn">${w.cn}</span>
+        </span>
         <button class="del" onclick="removeWrong('${w.en}')">移除</button>
       </div>
     `).join("");
 }
-
 function clearWrong() {
   if (!confirm("确定清空错题本？")) return;
   localStorage.removeItem(WRONG_KEY);
   renderWrong();
 }
-
 function reviewWrong() {
   const wrongs = JSON.parse(localStorage.getItem(WRONG_KEY) || "[]");
   if (wrongs.length === 0) { alert("错题本为空"); return; }
@@ -528,7 +513,6 @@ function reviewWrong() {
   updateStat();
   showCard();
 }
-
 function exportData() {
   const data = {
     wordList,
@@ -543,7 +527,6 @@ function exportData() {
   a.click();
   URL.revokeObjectURL(url);
 }
-
 function importData() {
   const input = document.createElement("input");
   input.type = "file";
@@ -570,7 +553,6 @@ function importData() {
   };
   input.click();
 }
-
 function speak(text) {
   if (!("speechSynthesis" in window) || !text) return;
   try {
@@ -581,7 +563,6 @@ function speak(text) {
     speechSynthesis.speak(u);
   } catch (e) {}
 }
-
 function shuffle(arr) {
   for (let i = arr.length - 1; i > 0; i--) {
     const j = Math.floor(Math.random() * (i + 1));
@@ -589,30 +570,25 @@ function shuffle(arr) {
   }
   return arr;
 }
-
 function calcRate() {
   const total = right + wrong;
   if (total === 0) return 0;
   return Math.round(right / total * 100);
 }
-
 function updateStat() {
   document.getElementById("index").innerText = idx + 1;
   document.getElementById("right").innerText = right;
   document.getElementById("wrong").innerText = wrong;
   document.getElementById("rate").innerText = calcRate() + "%";
 }
-
 function updateTotal() {
   document.getElementById("total").innerText = wordList.length;
   document.getElementById("mastered").innerText = masteredList.length;
 }
-
 function resetBatch() {
   if (getAvailableWords().length === 0) { alert("请先导入单词"); return; }
   startBatch();
 }
-
 function disableButtons(flag) {
   document.getElementById("showBtn").disabled = flag;
   document.getElementById("rightBtn").disabled = flag;
@@ -620,7 +596,6 @@ function disableButtons(flag) {
   document.getElementById("masterBtn").disabled = flag;
   document.getElementById("replayBtn").disabled = flag;
 }
-
 function clearAllData() {
   if (!confirm("确定清空所有单词、进度、错题？")) return;
   localStorage.removeItem(STORAGE_KEY);
@@ -640,7 +615,6 @@ function clearAllData() {
   updateTotal();
   renderWrong();
 }
-
 init();
 </script>
 <script src="register-sw.js"></script>
