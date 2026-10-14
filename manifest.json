@@ -8,7 +8,7 @@
   "description": "自定义导入单词的记忆背诵工具",
   "icons": [
     {
-      "src": "https://cdn-icons-png.flaticon.com/512/2851/2851463.png",
+      "src": "icon-512.png",
       "sizes": "512x512",
       "type": "image/png"
     }
