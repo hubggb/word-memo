@@ -49,6 +49,8 @@
         }
         .btn-blue{background:#3b78f0;color:white;}
         .btn-gray{background:#444b60;color:white;}
+        .btn-right{background:#39b54a;color:white;}
+        .btn-wrong{background:#ed4c4c;color:white;}
         .big-word{
             font-size:42px;
             text-align:center;
@@ -59,17 +61,6 @@
             text-align:center;
             margin:10px 0 20px;
             color:#8cf;
-        }
-        .answer-input-area{
-            margin:1rem 0;
-        }
-        #answerInput{
-            width:100%;
-            padding:14px;
-            font-size:18px;
-            border-radius:12px;
-            border:none;
-            outline:none;
         }
         .theme-switch{
             float:right;
@@ -119,30 +110,37 @@ beautiful,adj.,美丽的"></textarea>
         </div>
     </div>
 
-    <!-- 背诵卡片【保留原来提问/答题展示区域】 -->
+    <!-- 背诵卡片【核心！这里新增默写输入框，原有按钮全部保留】 -->
     <div class="card">
         <div id="statusText" style="text-align:center;font-size:22px;color:#b8c0e0;">未开始</div>
-        <!-- 题目展示（原来的提问区） -->
+        <!-- 题目展示区（apple单词） -->
         <div class="big-word" id="showWord"></div>
-        <!-- 答案展示区域（原来显示释义的地方） -->
+        <!-- 答案展示区 -->
         <div class="answer-display" id="showAnswerBox"></div>
-        <!-- 对错提示文字 -->
         <div id="resultTip"></div>
 
-        <!-- 【新增：答案输入默写框】 -->
-        <div id="answer-input-area" class="answer-input-area" style="display:none;">
-            <input type="text" id="answerInput" placeholder="在此输入答案...">
-            <div class="btn-row" style="margin-top:10px;">
-                <button class="btn-blue" id="submitAnswerBtn">提交答案</button>
-                <button class="btn-gray" id="showAnswerBtn">显示答案</button>
+        <!-- =====【新增默写答题输入框，就在单词下面、按钮上方】===== -->
+        <div id="answer-input-area" style="margin:16px 0;">
+            <input type="text" id="answerInput" placeholder="在这里输入你的答案..." style="width:100%;padding:12px;font-size:18px;border-radius:10px;border:1px solid #ccc;background:#2b3248;color:#fff;">
+            <div style="display:flex;gap:8px;margin-top:10px;">
+                <button id="submitAnswerBtn" style="flex:1;padding:10px;background:#3b78f0;color:white;border:none;border-radius:8px;">提交答案</button>
             </div>
         </div>
+        <!-- ============================================= -->
 
-        <div style="text-align:center;margin-top:20px;">
-            <button class="btn-blue" id="startBtn" style="width:70%;font-size:20px;padding:16px;">开始本轮</button>
+        <div class="btn-row">
+            <button class="btn-blue" id="startBtn">开始本轮</button>
+            <button class="btn-gray" id="showAnswerBtn">显示答案</button>
+            <button class="btn-right" id="btnRight">答对</button>
+            <button class="btn-wrong" id="btnWrong">答错</button>
         </div>
     </div>
 
+    <!-- 统计面板 -->
+    <div class="card">
+        <h3>📊 统计</h3>
+        <div id="statText">总单词：0 | 已掌握：0 | 本轮：0/0 | 答对：0 | 答错：0 | 正确率：0%</div>
+    </div>
 
 <script>
 // 全局变量
@@ -150,6 +148,8 @@ let wordList = [];
 let currentWord = null;
 let mode = 'en2cn'; // en2cn英文猜中文 / cn2en中文猜英文
 let remainWords = [];
+let rightCount = 0;
+let wrongCount = 0;
 
 // DOM元素
 const wordText = document.getElementById('wordText');
@@ -166,14 +166,17 @@ const showWord = document.getElementById('showWord');
 const showAnswerBox = document.getElementById('showAnswerBox');
 const resultTip = document.getElementById('resultTip');
 const loadTip = document.getElementById('loadTip');
+const statText = document.getElementById('statText');
+const btnRight = document.getElementById('btnRight');
+const btnWrong = document.getElementById('btnWrong');
+const showAnswerBtn = document.getElementById('showAnswerBtn');
 
-// 答题输入框DOM
+// 【默写答题模块DOM】
 const answerInputArea = document.getElementById('answer-input-area');
 const answerInput = document.getElementById('answerInput');
 const submitAnswerBtn = document.getElementById('submitAnswerBtn');
-const showAnswerBtn = document.getElementById('showAnswerBtn');
 
-// ==========【修复：加载单词函数】==========
+// ==========加载单词函数==========
 loadBtn.onclick = function(){
     loadTip.textContent = "";
     const rawText = wordText.value;
@@ -181,13 +184,9 @@ loadBtn.onclick = function(){
     wordList = [];
 
     for(let line of lines){
-        // 去除一行首尾空白
         const lineTrim = line.trim();
-        // 空行直接跳过
         if(lineTrim === "") continue;
-        // 按逗号、中文逗号、制表符分割
         const arr = lineTrim.split(/[,，\t]+/);
-        // 必须至少3段：英文，词性，中文释义
         if(arr.length >=3){
             wordList.push({
                 en: arr[0].trim(),
@@ -198,20 +197,31 @@ loadBtn.onclick = function(){
             })
         }
     }
-    // 保存到本地存储
     localStorage.setItem('wordData', JSON.stringify(wordList));
-    // 在页面文字提示（不再依赖alert！解决alert被拦截看不到提示）
     loadTip.textContent = `✅ 成功导入 ${wordList.length} 个单词`;
     setTimeout(()=> loadTip.textContent="", 3000);
+    updateStat();
 }
 
 // 本地存储读取
 window.onload = function(){
     const saved = localStorage.getItem('wordData');
     if(saved) wordList = JSON.parse(saved);
+    updateStat();
 }
 
-// 备份、恢复、清空
+// 更新统计面板
+function updateStat(){
+    let total = wordList.length;
+    let master = wordList.filter(w=>w.right>=2).length;
+    let allRight = wordList.reduce((sum,w)=>sum+w.right,0);
+    let allWrong = wordList.reduce((sum,w)=>sum+w.wrong,0);
+    let totalTry = allRight + allWrong;
+    let rate = totalTry===0 ? 0 : Math.round(allRight/totalTry*100);
+    statText.innerHTML = `总单词：${total} | 已掌握：${master} | 本轮：${remainWords.length>0 ? (wordList.length - remainWords.length)+"/"+wordList.length : "0/0"} | 答对：${allRight} | 答错：${allWrong} | 正确率：${rate}%`;
+}
+
+// 备份单词
 backupBtn.onclick = function(){
     const dataStr = JSON.stringify(wordList,null,2);
     const blob = new Blob([dataStr],{type:'text/json'});
@@ -220,6 +230,8 @@ backupBtn.onclick = function(){
     a.download = "word_backup.json";
     a.click();
 }
+
+// 恢复单词
 restoreBtn.onclick = function(){
     const inp = document.createElement('input');
     inp.type='file';
@@ -230,18 +242,22 @@ restoreBtn.onclick = function(){
             wordList = JSON.parse(res.target.result);
             localStorage.setItem('wordData', JSON.stringify(wordList));
             loadTip.textContent="✅ 恢复成功";
+            updateStat();
             setTimeout(()=> loadTip.textContent="",3000);
         }
         fr.readAsText(e.target.files[0]);
     }
     inp.click();
 }
+
+// 清空单词
 clearBtn.onclick = function(){
-    if(confirm("确定清空所有单词数据？")){
+    if(confirm("确定清空所有单词？")){
         wordList = [];
         localStorage.removeItem('wordData');
         wordText.value="";
         loadTip.textContent="✅ 单词已清空";
+        updateStat();
         setTimeout(()=> loadTip.textContent="",3000);
     }
 }
@@ -262,43 +278,58 @@ startBtn.onclick = function(){
     shuffle(remainWords);
     remainWords = remainWords.slice(0,total);
     nextWord();
-    showAnswerInput();
 }
 
-// 下一个单词【核心：重置提问区域】
+// 切换下一题
 function nextWord(){
     if(remainWords.length === 0){
         statusText.textContent = "🎉 本轮背诵完成！";
         showWord.textContent = "";
         showAnswerBox.textContent = "";
         resultTip.textContent = "";
-        hideAnswerInput();
+        answerInput.value = "";
+        updateStat();
         return;
     }
     currentWord = remainWords.shift();
     showAnswerBox.textContent = "";
     resultTip.textContent = "";
+    answerInput.value = "";
     if(mode === 'en2cn'){
         showWord.textContent = `${currentWord.en} 【${currentWord.pos}】`;
-        statusText.textContent = `剩余 ${remainWords.length+1} 个单词`;
     }else{
         showWord.textContent = currentWord.cn;
-        statusText.textContent = `剩余 ${remainWords.length+1} 个单词`;
     }
-    answerInput.value = "";
-    answerInput.focus();
+    statusText.textContent = `剩余 ${remainWords.length} 题`;
+    updateStat();
 }
 
-// 显示/隐藏输入框
-function showAnswerInput(){
-    answerInputArea.style.display = "block";
-}
-function hideAnswerInput(){
-    answerInputArea.style.display = "none";
+// 显示答案按钮
+showAnswerBtn.onclick = function(){
+    if(mode === 'en2cn'){
+        showAnswerBox.textContent = `答案：${currentWord.cn}`;
+    }else{
+        showAnswerBox.textContent = `答案：${currentWord.en}【${currentWord.pos}】`;
+    }
 }
 
-// 核对答案，页面内展示对错，不用弹窗
-function checkUserAnswer(){
+// 答对按钮
+btnRight.onclick = function(){
+    currentWord.right +=1;
+    localStorage.setItem('wordData', JSON.stringify(wordList));
+    updateStat();
+    setTimeout(nextWord,1000);
+}
+// 答错按钮
+btnWrong.onclick = function(){
+    currentWord.wrong +=1;
+    localStorage.setItem('wordData', JSON.stringify(wordList));
+    updateStat();
+    setTimeout(nextWord,1000);
+}
+
+// =====【新增默写提交答案逻辑】=====
+submitAnswerBtn.onclick = function(){
     const userAns = answerInput.value.trim().toLowerCase();
     let rightAns;
     if(mode === 'en2cn'){
@@ -308,29 +339,15 @@ function checkUserAnswer(){
     }
     if(userAns === rightAns){
         resultTip.innerHTML = `<div class="result-right">✅ 回答正确！</div>`;
-        currentWord.right +=1;
+        setTimeout(()=>{btnRight.click();},800);
     }else{
-        resultTip.innerHTML = `<div class="result-wrong">❌ 回答错误，正确答案：${rightAns}</div>`;
-        currentWord.wrong +=1;
+        resultTip.innerHTML = `<div class="result-wrong">❌ 错误！正确答案：${rightAns}</div>`;
+        setTimeout(()=>{btnWrong.click();},800);
     }
-    localStorage.setItem('wordData', JSON.stringify(wordList));
-    setTimeout(nextWord,1200); // 等待1.2秒自动跳到下一题
 }
-
-// 【保留原功能：显示答案，在页面展示到提问区下方，不是弹窗！】
-showAnswerBtn.onclick = function(){
-    if(mode === 'en2cn'){
-        showAnswerBox.textContent = `答案：${currentWord.cn}`;
-    }else{
-        showAnswerBox.textContent = `答案：${currentWord.en}【${currentWord.pos}】`;
-    }
-    setTimeout(nextWord,1200);
-}
-
-// 绑定提交事件
-submitAnswerBtn.onclick = checkUserAnswer;
+// 回车提交
 answerInput.addEventListener('keydown',function(e){
-    if(e.key === 'Enter') checkUserAnswer();
+    if(e.key === 'Enter') submitAnswerBtn.click();
 })
 
 // 洗牌函数
@@ -341,7 +358,7 @@ function shuffle(arr){
     }
 }
 
-// 暗色亮色切换
+// 深色浅色切换
 const darkToggle = document.getElementById('darkToggle');
 let dark = true;
 darkToggle.onclick = function(){
@@ -351,15 +368,10 @@ darkToggle.onclick = function(){
         document.body.style.color='#eef';
         darkToggle.textContent='🌙';
     }else{
-        document.body.style.background='#fff';
+        document.body.style.background='#ffffff';
         document.body.style.color='#222';
         darkToggle.textContent='☀️';
     }
-}
-
-// 注册PWA Service Worker
-if('serviceWorker' in navigator){
-    navigator.serviceWorker.register('./sw.js');
 }
 </script>
 </body>
